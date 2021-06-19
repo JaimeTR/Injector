@@ -20,3 +20,7 @@ Help Options for Xenon:
 -dll     Use dll
 -location        Specify the location i.e either server or local
 ```
+
+# Why make it?
+
+Main aim is to help me in OSEP :P
