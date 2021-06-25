@@ -1,46 +1,33 @@
-using System;
-using System.Text;
-using System.Security.Cryptography;
+∩╗┐using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Helper
 {
     class Program
     {
-        static byte[] Encrypt(byte[] data,string password)
+        static byte[] Encrypt(byte[] data,string Key, string IV)
         {
-            byte[] m_Key = Encoding.ASCII.GetBytes(password);
-            byte[] m_IV = Encoding.ASCII.GetBytes("123456");
-            if (data == null)
-            {
-                throw new ArgumentNullException(nameof(data));
-            }
-
-            using (var rijndaelManaged = new RijndaelManaged())
-            {
-                rijndaelManaged.KeySize = m_Key.Length * 8;
-                rijndaelManaged.Key = m_Key;
-                rijndaelManaged.BlockSize = m_IV.Length * 8;
-                rijndaelManaged.IV = m_IV;
-
-                using (var encryptor = rijndaelManaged.CreateEncryptor())
-                using (var ms = new MemoryStream())
-                using (var cryptoStream = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-                {
-                    cryptoStream.Write(data, 0, data.Length);
-                    cryptoStream.FlushFinalBlock();
-
-                    return ms.ToArray();
-                }
-            }
+            AesCryptoServiceProvider dataencrypt = new AesCryptoServiceProvider();
+            dataencrypt.BlockSize = 128;
+            dataencrypt.KeySize = 128;
+            dataencrypt.Key = System.Text.Encoding.UTF8.GetBytes(Key);
+            dataencrypt.IV = System.Text.Encoding.UTF8.GetBytes(IV);
+            dataencrypt.Padding = PaddingMode.PKCS7;
+            dataencrypt.Mode = CipherMode.CBC;
+            ICryptoTransform crypto1 = dataencrypt.CreateEncryptor(dataencrypt.Key, dataencrypt.IV);
+            byte[] encrypteddata = crypto1.TransformFinalBlock(data, 0, data.Length);
+            crypto1.Dispose();
+            return encrypteddata;
         }
 
-        static byte[] xor_enc(byte[] shellcode,string pass)
+        static byte[] xor_enc(byte[] shellcode, string pass)
         {
             byte[] key = Encoding.ASCII.GetBytes(pass);
             byte[] enc_shelcode = new byte[shellcode.Length];
             int j = 0;
-            for(int i = 0; i < shellcode.Length; i++)
+            for (int i = 0; i < shellcode.Length; i++)
             {
                 if (j >= key.Length)
                 {
@@ -59,21 +46,17 @@ namespace Helper
 
         static void Main(string[] args)
         {
-	    if(args.Length != 5){
-		    help_me();
-		    return;
-	    }
-            if (args[1].StartsWith("-location") && args[2].StartsWith("-encrypt") && args[3].StartsWith("-password") && args[4].StartsWith("-saveTo"))
+            if (args[0].StartsWith("-location") && args[1].StartsWith("-encrypt") && args[2].StartsWith("-password") && args[3].StartsWith("-saveTo"))
             {
-                string location = args[1].Split('=')[1];
-                string algo = args[2].Split('=')[1];
-                string pass = args[3].Split('=')[1];
-                string writeTo = args[4].Split('=')[1];
+                string location = args[0].Split('=')[1];
+                string algo = args[1].Split('=')[1];
+                string pass = args[2].Split('=')[1];
+                string writeTo = args[3].Split('=')[1];
 
                 byte[] shellcode = File.ReadAllBytes(location);
                 if (algo == "aes")
                 {
-                    byte[] encoded_shellcode = Encrypt(shellcode, pass);
+                    byte[] encoded_shellcode = Encrypt(shellcode, pass,"1234567891234567");
                     File.WriteAllBytes(writeTo, encoded_shellcode);
                     Console.WriteLine("[+] Encrypted aes shellcode written to disk");
                     return;
@@ -94,4 +77,3 @@ namespace Helper
         }
     }
 }
-
