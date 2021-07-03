@@ -46,6 +46,10 @@ Injector.exe -m=5 -TempFile=C:\\Users\\user\\sample.txt
 ```
 This will give you a session where you can execute IEX cradle and get a proper reverse shell hence bypassing CLM.
 
+## Help me with Antivirus?
+
+A specific function called basic_rev in Program.cs of Injector triggers windows defender. It is advised to edit the function and remove the WaitForSingleObject line which will end up making that whole module useless but helps to bypass defender on Windows. Why to use a basic reverse shell mode when advance modes will give you persistence and help evade defender better :)
+
 # Why make it?
 
 Main aim is to help me in OSEP :P
