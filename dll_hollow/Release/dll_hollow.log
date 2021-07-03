@@ -1,0 +1,7 @@
+﻿  dll_hollow.cpp
+     Creating library C:\Users\root\source\repos\Injector\Release\dll_hollow.lib and object C:\Users\root\source\repos\Injector\Release\dll_hollow.exp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  Finished generating code
+  All 70 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  dll_hollow.vcxproj -> C:\Users\root\source\repos\Injector\Release\dll_hollow.dll

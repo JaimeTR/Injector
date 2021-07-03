@@ -9,6 +9,7 @@ Complete Arsenal of Memory injection and other techniques for red-teaming in Win
 - With -bypass flag it tends to use more advanced un-documented API for process injeciton and the routine itself gets changes.
 - Now even supports encrypted shellcode i.e AES encrypted and Xor encryted shellcode are now supported. To encrypt the shellcode use Helper.exe in order to maintain consistency.  
 - Supports CLM bypass for powershell. Just drop it to a whitelisted folder where you can execute C# binary, for instance at C:\\Windows\\Tasks
+- Now comes with support for DLL Hollowing. DLL hollowing is implemented via the dll_hollow.dll! So in case you end up using this mode, make sure the dll and the exe are in same place.
 
 ```
 C:\Users\admin>Injector.exe
@@ -19,6 +20,7 @@ Help Options for Xenon:
         -m 3     Specifies the mode as Process Hollowing
         -m 4     No injection! Give me my damn shell
         -m 5     Powershell session via CLM bypass
+        -m 6     DLL hollowing
 
 -TempFile        File location that your current user can read
 -shellcode       Use shellcode
@@ -55,3 +57,6 @@ Shoot me a DM on twitter @gh0st_R1d3r_0x9 to talk abt more interesting indeas/mo
 Current module in pipeline
 - Phantom DLL Injection
 
+# Acknowledgements
+
+[Ired Team](https://www.ired.team/offensive-security/code-injection-process-injection/modulestomping-dll-hollowing-shellcode-injection)

