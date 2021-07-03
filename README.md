@@ -47,3 +47,11 @@ This will give you a session where you can execute IEX cradle and get a proper r
 # Why make it?
 
 Main aim is to help me in OSEP :P
+
+# Talk to me?
+
+Shoot me a DM on twitter @gh0st_R1d3r_0x9 to talk abt more interesting indeas/modules that can make this more amazing!
+
+Current module in pipeline
+- Phantom DLL Injection
+
